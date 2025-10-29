@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="./libs/d3.js"></script>
+    <script src="./libs/d3jstopojson.v1.js"></script>
+    <title>MA Map</title>
+    <style>
+        body {
+            font-family: "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f6f8;
+        }
+
+        h1, h3 {
+            text-align: center;
+            color: #222;
+        }
+
+        #tooltip {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            padding: 12px;
+            font-size: 14px;
+            line-height: 1.4;
+            border: 1px solid #ddd;
+            transition: opacity 0.2s ease-in-out;
+        }
+
+        path {
+            stroke: #333;
+            stroke-width: 0.6px;
+            transition: all 0.2s ease;
+        }
+
+        path:hover {
+            opacity: 0.85;
+            stroke: #000;
+            stroke-width: 2px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 25px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .map-container {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 8px rgba(0, 0, 0, 0.08);
+            width: 650px;
+        }
+
+        .legend {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .legend svg {
+            display: block;
+        }
+
+        .fig3 path:hover {
+            stroke-width: 0.6px;
+            stroke: #333;
+            opacity: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="tooltip"></div>
+    <div class="container">
+        <h1>Major Assignment 2</h1>
+        <h3>Fnu Chandrakanth</h3>
+
+        <div class="map-container">
+            <h4>Population in 1980</h4>
+            <div class="fig1"></div>
+            <div class="legend" id="legend1"></div>
+        </div>
+
+        <div class="map-container">
+            <h4>Population Change (1980-2010)</h4>
+            <div class="fig2"></div>
+            <div class="legend" id="legend2"></div>
+        </div>
+
+        <div class="map-container">
+            <h4>Gini Index by County (2019)</h4>
+            <div class="fig3"></div>
+            <div class="legend" id="legend3"></div>
+        </div>
+    </div>
+
+    <script>
+        const svgWidth = 600, svgHeight = 400, margin = 20;
+
+        const MA_counties = "./data/towns.topojson";
+        const gini_index = "./data/gini_index.csv";
+
+        Promise.all([d3.json(MA_counties), d3.csv(gini_index)]).then(data => {
+            const topology_data = data[0];
+            const csv_data = data[1];
+
+            const giniByCountyAndYear = {};
+            csv_data.forEach(d => {
+                const fips = d.id.slice(-5);
+                if (!giniByCountyAndYear[fips]) giniByCountyAndYear[fips] = {};
+                giniByCountyAndYear[fips][d.year] = +d["Estimate!!Gini Index"];
+            });
+
+            const geojson = topojson.feature(topology_data, topology_data.objects.ma);
+            const projection = d3.geoMercator().fitSize([svgWidth - margin, svgHeight - margin], geojson);
+            const geoPath = d3.geoPath().projection(projection);
+
+            const tooltip = d3.select("#tooltip");
+
+            const drawMap = (container, colorScale, valueAccessor, tooltipText) => {
+                const svg = d3.select(container).append("svg")
+                    .attr("width", svgWidth)
+                    .attr("height", svgHeight);
+
+                svg.selectAll("path")
+                    .data(geojson.features)
+                    .enter()
+                    .append("path")
+                    .attr("d", geoPath)
+                    .attr("fill", d => {
+                        const val = valueAccessor(d);
+                        return val == null ? "#ccc" : colorScale(val);
+                    })
+                    .on("mouseenter", (event, d) => {
+                        tooltip.transition().duration(200).style("opacity", .9);
+                        tooltip.html(tooltipText(d))
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 28) + "px");
+                    })
+                    .on("mousemove", event => {
+                        tooltip.style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 28) + "px");
+                    })
+                    .on("mouseout", () => tooltip.transition().duration(300).style("opacity", 0));
+            };
+
+            const makeLegend = (selector, scale, label) => {
+                const legendSvg = d3.select(selector).append("svg")
+                    .attr("width", 260).attr("height", 55);
+
+                const gradientId = selector.replace("#", "") + "-gradient";
+                const defs = legendSvg.append("defs");
+                const gradient = defs.append("linearGradient")
+                    .attr("id", gradientId)
+                    .attr("x1", "0%").attr("x2", "100%");
+
+                gradient.selectAll("stop")
+                    .data(d3.ticks(0, 1, 10))
+                    .enter().append("stop")
+                    .attr("offset", d => `${100 * d}%`)
+                    .attr("stop-color", d => scale(scale.domain()[0] + d * (scale.domain()[1] - scale.domain()[0])));
+
+                legendSvg.append("rect")
+                    .attr("x", 30).attr("y", 15)
+                    .attr("width", 200).attr("height", 15)
+                    .style("fill", `url(#${gradientId})`)
+                    .style("stroke", "#ccc");
+
+                const legendScale = d3.scaleLinear().domain(scale.domain()).range([30, 230]);
+                legendSvg.append("g")
+                    .attr("transform", "translate(0,35)")
+                    .call(d3.axisBottom(legendScale).ticks(5).tickFormat(d3.format(".2s")))
+                    .selectAll("text").style("font-size", "10px");
+
+                legendSvg.append("text")
+                    .attr("x", 130).attr("y", 10)
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "12px")
+                    .style("fill", "#444")
+                    .text(label);
+            };
+
+            // ---- Map 1: Population 1980 ----
+            const pop1980Scale = d3.scaleSequential()
+                .domain(d3.extent(topology_data.objects.ma.geometries, d => d.properties.POP1980))
+                .interpolator(d3.interpolateYlGnBu);
+
+            drawMap(".fig1", pop1980Scale, d => d.properties.POP1980,
+                d => `${d.properties.TOWN}<br>Population (1980): ${d3.format(",")(d.properties.POP1980)}`);
+            makeLegend("#legend1", pop1980Scale, "Population (1980)");
+
+            // ---- Map 2: Population Change ----
+            const diffExtent = d3.extent(topology_data.objects.ma.geometries,
+                d => d.properties.POP2010 - d.properties.POP1980);
+            const maxAbs = Math.max(...diffExtent.map(Math.abs));
+
+            const popChangeScale = d3.scaleSequential()
+                .domain([-maxAbs, maxAbs])
+                .interpolator(d3.interpolateBrBG);
+
+            drawMap(".fig2", popChangeScale,
+                d => d.properties.POP2010 - d.properties.POP1980,
+                d => `${d.properties.TOWN}<br>Change (1980–2010): ${d3.format(",")(d.properties.POP2010 - d.properties.POP1980)}`);
+            makeLegend("#legend2", popChangeScale, "Population Change");
+
+            // ---- Map 3: Gini Index 2019 ----
+            const giniScale = d3.scaleSequential()
+                .domain(d3.extent(csv_data.filter(d => d.year === "2019"), d => +d["Estimate!!Gini Index"]))
+                .interpolator(d3.interpolatePuBuGn);
+
+            drawMap(".fig3", giniScale,
+                d => {
+                    const fips = d.properties.FIPS_STCO.toString();
+                    return giniByCountyAndYear[fips] ? giniByCountyAndYear[fips]["2019"] : null;
+                },
+                d => {
+                    const fips = d.properties.FIPS_STCO.toString();
+                    const val = giniByCountyAndYear[fips]?.["2019"];
+                    return `${d.properties.TOWN}<br>Gini Index (2019): ${val ? val.toFixed(3) : "N/A"}`;
+                });
+            makeLegend("#legend3", giniScale, "Gini Index (2019)");
+        });
+    </script>
+</body>
+</html>
