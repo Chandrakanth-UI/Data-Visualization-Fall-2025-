@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MA — Major Assignment 2 (Robust)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <style>
+    :root{--card-w:820px;--svg-w:760px;--svg-h:460px}
+    body{font-family:"Segoe UI",Roboto,Arial,sans-serif;margin:0;padding:18px;background:#f4f6f8;color:#111}
+    h1,h3{text-align:center;margin:6px 0}
+    .container{display:flex;flex-direction:column;align-items:center;gap:18px;max-width:1200px;margin:0 auto}
+    .map-card{width:var(--card-w);background:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+    .map-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .map-title h4{margin:0;font-size:16px}
+    .map-stage{display:flex;justify-content:center}
+    svg{background:#fbfdfe;border-radius:6px}
+    .legend{display:flex;justify-content:center;gap:10px;margin-top:8px;font-size:13px;color:#444}
+    #tooltip{position:absolute;pointer-events:none;opacity:0;transition:opacity .08s;background:white;border-radius:8px;padding:10px;box-shadow:0 6px 18px rgba(0,0,0,.12);max-width:360px;font-size:13px;line-height:1.3;border:1px solid #e6e6e6}
+    path.area{stroke:#556;stroke-width:.5px;transition:all .08s}
+    path.area:hover{stroke-width:1.2px;opacity:.95}
+    .highlight{stroke:#000 !important;stroke-width:2px !important;opacity:1 !important}
+    .muted{color:#666;font-size:12px}
+  </style>
+</head>
+<body>
+  <div id="tooltip"></div>
+  <div class="container">
+    <h1>Major Assignment 2 — Geospatial Visualizations</h1>
+    <h3>Fnu Chandrakanth</h3>
+
+    <div class="map-card">
+      <div class="map-title"><h4>MAP A — Population (1980)</h4><div class="muted">Hover to highlight town</div></div>
+      <div class="map-stage"><svg id="svgA" width="760" height="460"></svg></div>
+      <div id="legendA" class="legend"></div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-title"><h4>MAP B — Population change (1980 → 2010)</h4><div class="muted">Diverging scale</div></div>
+      <div class="map-stage"><svg id="svgB" width="760" height="460"></svg></div>
+      <div id="legendB" class="legend"></div>
+    </div>
+
+    <div class="map-card">
+      <div class="map-title"><h4>MAP C — Gini Index by county (2019)</h4><div class="muted">Tooltip shows time series sparkline</div></div>
+      <div class="map-stage"><svg id="svgC" width="760" height="460"></svg></div>
+      <div id="legendC" class="legend"></div>
+    </div>
+  </div>
+
+<script>
+const svgW = 760, svgH = 460;
+const tooltip = d3.select("#tooltip");
+const topoPath = "data/towns.topojson";
+const giniCsvPath = "data/gini_index.csv";
+const num = v => (v===undefined||v===null||v==="")?null:+v;
+
+Promise.all([d3.json(topoPath), d3.csv(giniCsvPath)])
+  .then(([topo, csv]) => {
+    /* ---------- topojson ---------- */
+    let objectName = null;
+    if (topo && topo.objects) {
+      const keys = Object.keys(topo.objects);
+      for (const pref of ["ma","towns","counties","municipalities","places"])
+        if (keys.includes(pref)) { objectName = pref; break; }
+      if (!objectName) objectName = keys[0];
+    } else throw new Error("Invalid TopoJSON");
+    const geo = topojson.feature(topo, topo.objects[objectName]);
+
+    /* ---------- population keys ---------- */
+    const sample = geo.features[0].properties||{};
+    const pop1980Candidates = ["POP1980","POP_1980","pop1980","Pop1980","POP_1980_"];
+    const pop2010Candidates = ["POP2010","POP_2010","pop2010","Pop2010","POP_2010_"];
+    const find = c => c.find(k=>sample[k]!==undefined||geo.features.some(f=>f.properties?.[k]!==undefined));
+    const pop1980Key = find(pop1980Candidates);
+    const pop2010Key = find(pop2010Candidates);
+
+    /* ---------- Gini CSV ---------- */
+    const hasYear = (csv.columns??Object.keys(csv[0]??{})).some(k=>k.toLowerCase()==="year");
+    const giniByFips = {}, giniByName = {};
+
+    if (hasYear) {
+      for (const r of csv) {
+        const id = String(r.id??r.ID??r.fips??r.FIPS??r.FIPS_STCO??"").slice(-5);
+        const yr = r.year??r.Year??r.YEAR;
+        const val = num(r["Estimate!!Gini Index"]??r["Estimate! Gini Index"]??r["Gini"]??r["VALUE"]??r.value??r["estimate"]);
+        if (!/^\d{5}$/.test(id)) {
+          const n = (r.county??r.COUNTY??r.TOWN??r.TOWN_NAME??"");
+          if (!n) continue;
+          if (!giniByName[n]) giniByName[n] = {};
+          giniByName[n][String(yr)] = val;
+        } else {
+          if (!giniByFips[id]) giniByFips[id] = {};
+          giniByFips[id][String(yr)] = val;
+        }
+      }
+    } else {
+      for (const r of csv) {
+        const n = r.TOWN??r.COUNTY??r.name??r.Name??r.NAME;
+        const v = num(r.GINI_INDEX??r.Gini??r.GINI??r.gini??r.value??r["Estimate!!Gini Index"]);
+        if (!n) continue;
+        giniByName[n] = v;
+      }
+    }
+
+
+    const featureFips = f => {
+      const p = f.properties||{};
+      const keys = ["FIPS_STCO","FIPS","fips","COUNTYFP","COUNTYFIPS","STCOFIPS","GEOID"];
+      for (const k of keys) if (p[k]!=null && p[k]!=="") {
+        const pad = String(p[k]).padStart(5,"0");
+        if (/^\d{5}$/.test(pad)) return pad;
+      }
+      return null;
+    };
+    const featureName = f => (f.properties||{}).COUNTY||(f.properties||{}).TOWN||(f.properties||{}).NAME||(f.properties||{}).name||(f.properties||{}).NAMELSAD||"";
+
+    /* ---------- domains ---------- */
+    const pop1980Vals=[], popChangeVals=[];
+    geo.features.forEach(f=>{
+      const p = f.properties||{};
+      const a = num(p[pop1980Key]), b = num(p[pop2010Key]);
+      if (a!=null) pop1980Vals.push(a);
+      if (a!=null&&b!=null) popChangeVals.push(b-a);
+    });
+    const pop1980Domain = pop1980Vals.length?d3.extent(pop1980Vals):[0,1];
+    const changeMax = popChangeVals.length?Math.max(Math.abs(d3.min(popChangeVals)),Math.abs(d3.max(popChangeVals))):1;
+    const popChangeDomain = [-changeMax,changeMax];
+
+    let giniVals=[];
+    for (const k of Object.keys(giniByFips))
+      if (giniByFips[k]["2019"]!=null || giniByFips[k][2019]!=null) giniVals.push(giniByFips[k]["2019"]??giniByFips[k][2019]);
+    if (!giniVals.length) for (const k of Object.keys(giniByName)) {
+      const v = typeof giniByName[k]==="object"? (giniByName[k]["2019"]??null) : giniByName[k];
+      if (v!=null) giniVals.push(v);
+    }
+    const giniDomain = giniVals.length?d3.extent(giniVals):[0.35,0.5];
+
+    /* ---------- color scales ---------- */
+    const popAColor = d3.scaleSequential().domain(pop1980Domain).interpolator(d3.interpolateYlGnBu);
+    const popChangeColor = d3.scaleDiverging()
+        .domain([popChangeDomain[0],0,popChangeDomain[1]])
+        .interpolator(d3.interpolateBrBG);
+    const giniColor = d3.scaleSequential().domain(giniDomain).interpolator(d3.interpolatePuBuGn);
+
+    /* ---------- projection ---------- */
+    const proj = d3.geoMercator().fitSize([svgW,svgH],geo);
+    const pathGen = d3.geoPath().projection(proj);
+
+    /* ---------- feature key ---------- */
+    const featureKey = f => {
+      const fp = featureFips(f);
+      if (fp) return `fips_${fp}`;
+      const n = featureName(f)||"unknown";
+      return `name_${n.trim().toLowerCase().replace(/\s+/g,"_").replace(/[^\w_-]/g,"")}`;
+    };
+
+    /* ---------- draw map ---------- */
+    const drawMap = (sel, fillAcc, onEnter, onLeave) => {
+      const svg = d3.select(sel).attr("viewBox",`0 0 ${svgW} ${svgH}`);
+      svg.selectAll("*").remove();
+      const g = svg.append("g");
+      g.selectAll("path")
+        .data(geo.features)
+        .join("path")
+        .attr("class","area")
+        .attr("d",pathGen)
+        .attr("data-key",featureKey)
+        .attr("fill",d=>{
+          const v = fillAcc(d);
+          return v==null?"#eceff1":fillAcc.colorScale?fillAcc.colorScale(v):v;
+        })
+        .on("mouseenter",function(e,d){
+          const key = featureKey(d);
+          const cur = d3.select(this.closest("svg"));
+          cur.selectAll(`[data-key="${key}"]`).classed("highlight",true);
+          if (onEnter) onEnter(e,d);
+        })
+        .on("mousemove",e=>tooltip.style("left",(e.pageX+12)+"px").style("top",(e.pageY+8)+"px"))
+        .on("mouseleave",function(e,d){
+          const key = featureKey(d);
+          const cur = d3.select(this.closest("svg"));
+          cur.selectAll(`[data-key="${key}"]`).classed("highlight",false);
+          if (onLeave) onLeave(e,d);
+        });
+    };
+
+    const showTooltip = (html,e) => tooltip.html(html).style("left",(e.pageX+12)+"px").style("top",(e.pageY+8)+"px").transition().duration(60).style("opacity",1);
+    const hideTooltip = () => tooltip.transition().duration(80).style("opacity",0).on("end",()=>tooltip.html(""));
+
+    /* ---------- Map A ---------- */
+    drawMap("#svgA",
+      Object.assign(d=>num(d.properties?.[pop1980Key]),{colorScale:popAColor}),
+      (e,d)=>showTooltip(`<strong>${featureName(d)||"Unknown"}</strong><div class="muted">Population (1980):</div><div>${num(d.properties?.[pop1980Key])==null?"N/A":d3.format(",")(num(d.properties?.[pop1980Key]))}</div>`,e),
+      hideTooltip);
+    makeGradientLegend("#legendA",popAColor,"Population (1980)",pop1980Domain);
+
+    /* ---------- Map B ---------- */
+    drawMap("#svgB",
+      Object.assign(d=>{
+        const p=d.properties||{};
+        const a=num(p[pop1980Key]), b=num(p[pop2010Key]);
+        return a==null||b==null?null:b-a;
+      },{colorScale:popChangeColor}),
+      (e,d)=>{
+        const p=d.properties||{};
+        const a=num(p[pop1980Key]), b=num(p[pop2010Key]);
+        const ch = a==null||b==null?null:b-a;
+        showTooltip(`<strong>${featureName(d)||"Unknown"}</strong><div class="muted">Change (1980→2010):</div><div>${ch==null?"N/A":d3.format(",")(ch)}</div>`,e);
+      },
+      hideTooltip);
+    makeGradientLegend("#legendB",popChangeColor,"Population change (1980 → 2010)",popChangeDomain);
+
+    /* ---------- Map C ---------- */
+    drawMap("#svgC",
+      Object.assign(d=>{
+        const fp=featureFips(d);
+        if (fp && giniByFips[fp]) {
+          const v = giniByFips[fp]["2019"]??giniByFips[fp][2019];
+          if (v!=null) return v;
+        }
+        const n=featureName(d);
+        const v = giniByName[n];
+        if (v!=null && typeof v!=="object") return num(v);
+        if (v!=null && typeof v==="object") return v["2019"]??v[2019]??null;
+        return null;
+      },{colorScale:giniColor}),
+      (e,d)=>{
+        const fp=featureFips(d), n=featureName(d);
+        let series=[];
+        if (fp && giniByFips[fp]) {
+          const ys=Object.keys(giniByFips[fp]).sort((a,b)=>+a-+b);
+          series=ys.map(y=>({year:y,value:giniByFips[fp][y]}));
+        } else if (giniByName[n]) {
+          const v=giniByName[n];
+          if (typeof v==="object") {
+            const ys=Object.keys(v).sort((a,b)=>+a-+b);
+            series=ys.map(y=>({year:y,value:v[y]}));
+          } else series=[{year:"2019",value:num(v)}];
+        }
+        const latest = series.find(s=>s.year==="2019")||series[series.length-1]||{year:"N/A",value:null};
+        let html = `<strong>${n||"Unknown"}</strong><div class="muted">Gini (2019):</div><div>${latest.value==null?"N/A":latest.value.toFixed(3)}</div><div class="muted" style="margin-top:6px">Series:</div>`;
+        if (!series.length) html+=`<div style="font-size:12px;color:#666">No data</div>`;
+        else html+=`<div style="font-size:12px;margin-top:4px">${series.map(s=>`${s.year}:${s.value==null?"N/A":s.value.toFixed(3)}`).join(" • ")}</div>`;
+        html+=`<div id="spark" style="margin-top:8px"></div>`;
+        showTooltip(html,e);
+        drawSparkline("#spark",series);
+      },
+      hideTooltip);
+    makeGradientLegend("#legendC",giniColor,"Gini Index (2019)",giniDomain);
+
+
+    function makeGradientLegend(sel, scale, label, domain){
+      const container = d3.select(sel);
+      container.selectAll("*").remove();
+
+      const w = 260,               
+            barH = 12,
+            totalH = 70;          
+
+      const svg = container.append("svg")
+          .attr("width", w)
+          .attr("height", totalH);
+
+      const defs = svg.append("defs");
+      const gid = `grad_${sel.replace(/\W/g,"")}_${Math.random()*10000|0}`;
+      const grad = defs.append("linearGradient")
+          .attr("id", gid)
+          .attr("x1","0%")
+          .attr("x2","100%");
+
+      for (let i=0;i<=10;i++){
+        const t = i/10;
+        const val = domain[0] + t*(domain[1]-domain[0]);
+        grad.append("stop")
+            .attr("offset", t*100+"%")
+            .attr("stop-color", scale(val));
+      }
+
+      /* ---- title ---- */
+      svg.append("text")
+          .attr("x", w/2)
+          .attr("y", 14)
+          .attr("text-anchor","middle")
+          .style("font-size","12px")
+          .style("fill","#333")
+          .text(label);
+
+      /* ---- gradient bar ---- */
+      const barY = 26;   
+      svg.append("rect")
+          .attr("x", 20)
+          .attr("y", barY)
+          .attr("width", w-40)
+          .attr("height", barH)
+          .style("fill", `url(#${gid})`)
+          .style("stroke","#ddd");
+
+      /* ---- axis ---- */
+      const axisY = barY + barH + 12;   
+      const legScale = d3.scaleLinear()
+          .domain(domain)
+          .range([20, w-20]);
+
+      svg.append("g")
+          .attr("transform", `translate(0,${axisY})`)
+          .call(d3.axisBottom(legScale)
+                .ticks(4)
+                .tickFormat(d3.format(".2s")))
+          .selectAll("text")
+          .style("font-size","11px");
+    }
+
+    /* ---------- sparkline  ---------- */
+    function drawSparkline(sel,series){
+      const c=d3.select(sel); c.selectAll("*").remove();
+      if (!series||!series.length) return;
+      const m={top:2,right:6,bottom:10,left:6};
+      const w=300-m.left-m.right, h=64-m.top-m.bottom;
+      const valid=series.filter(s=>s.value!=null);
+      if (!valid.length){ c.append("div").style("font-size","12px").style("color","#666").text("No numeric series"); return; }
+      const svg=c.append("svg").attr("width",w+m.left+m.right).attr("height",h+m.top+m.bottom);
+      const g=svg.append("g").attr("transform",`translate(${m.left},${m.top})`);
+      const x=d3.scaleLinear().domain([0,series.length-1]).range([0,w]);
+      const y=d3.scaleLinear().domain([d3.min(valid,d=>d.value),d3.max(valid,d=>d.value)]).nice().range([h,0]);
+      const line=d3.line().defined(d=>d.value!=null).x((d,i)=>x(i)).y(d=>y(d.value));
+      g.append("path").datum(series).attr("d",line).attr("fill","none").attr("stroke","#2b6cb0").attr("stroke-width",1.6);
+      g.selectAll("circle").data(valid).join("circle")
+        .attr("cx",(d,i)=>x(series.indexOf(d))).attr("cy",d=>y(d.value)).attr("r",2.8).attr("fill","#2b6cb0");
+      const first=series.findIndex(s=>s.value!=null);
+      const last=series.length-1-series.slice().reverse().findIndex(s=>s.value!=null);
+      g.append("text").text(series[first].year).attr("x",x(first)).attr("y",h+12).style("font-size","10px").style("fill","#666");
+      g.append("text").text(series[last].year).attr("x",x(last)).attr("y",h+12).attr("text-anchor","end")
+        .style("font-size","10px").style("fill","#666");
+    }
+  })
+  .catch(err=>{
+    console.error(err);
+    d3.select(".container").append("div").style("color","red").style("padding","12px").text("Error loading data – see console.");
+    tooltip.html("<strong>Error loading data</strong>").style("opacity",1).style("left","10px").style("top","10px");
+  });
+</script>
+</body>
+</html>
