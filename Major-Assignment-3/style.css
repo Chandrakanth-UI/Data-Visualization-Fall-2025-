@@ -1,0 +1,115 @@
+body {
+  margin: 0;
+  font-family: "Poppins", sans-serif;
+  background: #eef2f5;
+}
+
+header {
+  background: white;
+  padding: 16px;
+  text-align: center;
+  border-bottom: 1px solid #ddd;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.controls-panel {
+  position: absolute;
+  top: 150px;
+  left: 20px;
+  width: 235px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  z-index: 1000;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+}
+
+.controls-panel label {
+  margin-top: 12px;
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.controls-panel input[type="range"] {
+  width: 100%;
+}
+
+.controls-panel span {
+  font-family: monospace;
+  font-size: 14px;
+  float: right;
+  margin-top: 4px;
+}
+
+.legend {
+  position: absolute;
+  bottom: 10px;
+  left: 20px;
+  width: 250px;
+  background: #fff;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  z-index: 20000;
+}
+
+.legend::before {
+  content: "Top 10 Countries";
+  display: block;
+  text-align: center;
+  font-weight: 700;
+  margin-bottom: 12px;
+  font-size: 15px;
+  color: #333;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.legend-item:hover { background: rgba(13,110,253,0.1); }
+.legend-item.active { background: rgba(13,110,253,0.2); font-weight: 600; }
+
+.legend-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+#network-svg {
+  width: 100vw;
+  height: calc(100vh - 72px);
+  background: #f8f9fa;
+}
+
+.inactive {
+  opacity: 0.2 !important;
+}
+
+.tooltip {
+  position: absolute;
+  display: none;
+  background: white;
+  border-radius: 12px;
+  border: 2px solid #0d6efd;
+  padding: 14px;
+  z-index: 3000;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+  pointer-events: none;
+  max-width: 280px;
+}
+
+.tooltip h4 {
+  margin: 0 0 8px 0;
+  color: #0d6efd;
+}

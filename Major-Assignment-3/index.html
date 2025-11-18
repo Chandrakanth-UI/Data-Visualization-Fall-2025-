@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Author Collaboration Network - Fnu Chandrakanth</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>Author Collaboration Network</h1>
+  <p>Interactive force-directed graph showing author collaborations</p>
+</header>
+
+<div class="controls-panel">
+  <h3>Force Controls</h3>
+
+  <label>Charge Strength</label>
+  <input type="range" id="charge-slider" min="-500" max="-30" step="10" value="-120">
+  <span id="charge-value">-120</span>
+
+  <label>Collision Radius</label>
+  <input type="range" id="collide-slider" min="1" max="5" step="0.2" value="2.5">
+  <span id="collide-value">2.5</span>
+
+  <label>Link Strength</label>
+  <input type="range" id="link-slider" min="0" max="1" step="0.05" value="0.4">
+  <span id="link-value">0.4</span>
+</div>
+
+<div id="legend-items" class="legend"></div>
+
+<svg id="network-svg" viewBox="0 0 1600 1000"></svg>
+
+<div id="tooltip" class="tooltip">
+  <h4 id="tooltip-author"></h4>
+  <p><strong>Affiliation:</strong> <span id="tooltip-affiliation"></span></p>
+  <p><strong>Country:</strong> <span id="tooltip-country"></span></p>
+  <p><strong>Collaborations (Degree):</strong> <span id="tooltip-degree"></span></p>
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="network.js"></script>
+
+<script>
+  d3.json("data.json").then(data => {
+    simulate(data, d3.select("#network-svg"));
+  }).catch(err => console.error("Failed to load data.json", err));
+</script>
+
+</body>
+</html>
